@@ -1,0 +1,23 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.venv/
+*.egg-info/
+dist/
+build/
+
+# Environment — NEVER commit this
+.env
+
+# Database — Railway will use its own
+*.db
+*.db-shm
+*.db-wal
+
+# UV
+.uv/
+
+# IDE
+.vscode/
+.idea/
