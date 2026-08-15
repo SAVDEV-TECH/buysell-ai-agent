@@ -128,16 +128,26 @@ def root():
 @app.get("/widget", response_class=HTMLResponse)
 def widget():
     """Serve the chat widget HTML page."""
-    widget_path = os.path.join(
-        os.path.dirname(__file__), "..", "..", "..", "chat_widget.html"
-    )
-    widget_path = os.path.abspath(widget_path)
+    candidates = [
+        os.path.join(os.path.dirname(__file__), "..", "..", "chat_widget.html"),
+        os.path.join(os.getcwd(), "chat_widget.html"),
+        os.path.join(os.path.dirname(__file__), "..", "..", "..", "chat_widget.html"),
+    ]
+    widget_path = None
+    for c in candidates:
+        if os.path.exists(c):
+            widget_path = os.path.abspath(c)
+            break
+
+    if not widget_path:
+        return HTMLResponse("<h3>chat_widget.html not found</h3>", status_code=404)
+
     with open(widget_path, "r", encoding="utf-8") as f:
         html = f.read()
-    # Replace localhost placeholder with the same origin so it works when deployed
+    # Replace localhost placeholder with empty string so API calls use the current domain
     html = html.replace(
-        'const API_BASE = "http://localhost:8000"',
-        'const API_BASE = ""',  # empty = same origin
+        'const API_BASE = "http://localhost:8000";',
+        'const API_BASE = "";',
     )
     return HTMLResponse(content=html)
 
