@@ -1,5 +1,6 @@
 """
-repository.py — V5: Real SQL queries replacing all in-memory mock data.
+repository.py — V6: Supabase PostgreSQL & SQLModel queries.
+Handles B2B products, tiered pricing, and organizations.
 """
 import re
 from typing import List, Optional
@@ -7,63 +8,87 @@ from typing import List, Optional
 from sqlmodel import Session, select, col
 
 from buysell_agent.data.database import get_session
-from buysell_agent.data.models import Order, OrderStatus, Product, Supplier
+from buysell_agent.data.models import (
+    Order,
+    OrderStatus,
+    Organization,
+    Product,
+    SupplierInfo,
+)
 
 
 # ---------------------------------------------------------------------------
 # Product Repository
 # ---------------------------------------------------------------------------
 class ProductRepository:
-    """All product and supplier queries against the SQLite database."""
+    """Queries for B2B products and organizations."""
 
     def search_by_name(self, query: str) -> List[Product]:
+        """Search products by title or description."""
         with get_session() as session:
+            term = f"%{query.lower()}%"
             statement = select(Product).where(
-                col(Product.name).contains(query.lower())
+                col(Product.title).ilike(term) | col(Product.description).ilike(term)
             )
             return session.exec(statement).all()
 
     def get_by_exact_name(self, name: str) -> Optional[Product]:
+        """Find product by exact or best-matching title."""
         with get_session() as session:
-            # Try exact match first
-            statement = select(Product).where(
-                col(Product.name).ilike(name)
-            )
+            # 1. Exact match (case-insensitive)
+            statement = select(Product).where(col(Product.title).ilike(name))
             result = session.exec(statement).first()
             if result:
                 return result
-            # Fallback: partial match
-            statement = select(Product).where(
-                col(Product.name).contains(name.lower())
-            )
+
+            # 2. Substring match
+            term = f"%{name.lower()}%"
+            statement = select(Product).where(col(Product.title).ilike(term))
             return session.exec(statement).first()
 
-    def update_stock(self, product_id: int, new_stock: int) -> None:
+    def get_suppliers_for_product(self, product_name: str) -> List[SupplierInfo]:
+        """
+        Find all supplier organizations offering products matching product_name,
+        including their tiered pricing and MOQ.
+        """
         with get_session() as session:
-            product = session.get(Product, product_id)
-            if product:
-                product.stock = new_stock
-                session.add(product)
-                session.commit()
+            term = f"%{product_name.lower()}%"
+            statement = select(Product).where(col(Product.title).ilike(term))
+            products = session.exec(statement).all()
 
-    def get_suppliers_for_product(self, product_name: str) -> List[Supplier]:
-        with get_session() as session:
-            statement = select(Supplier).where(
-                col(Supplier.product_name).contains(product_name.lower())
-            )
-            return session.exec(statement).all()
+            results: List[SupplierInfo] = []
+            for p in products:
+                supplier_name = "BuySell Verified Supplier"
+                currency = "USD"
+                if p.supplier_organization_id:
+                    org = session.get(Organization, p.supplier_organization_id)
+                    if org:
+                        supplier_name = org.company_name
+                        currency = org.base_currency or "USD"
+
+                results.append(
+                    SupplierInfo(
+                        name=supplier_name,
+                        product_title=p.title,
+                        unit_price=p.base_price,
+                        min_order_qty=p.min_order_quantity,
+                        unit_of_measure=p.unit_of_measure,
+                        currency=currency,
+                        lead_time_days=3,
+                        tiered_pricing=p.tiered_pricing if isinstance(p.tiered_pricing, list) else [],
+                    )
+                )
+
+            return results
 
 
 # ---------------------------------------------------------------------------
 # Order Repository
 # ---------------------------------------------------------------------------
 class OrderRepository:
-    """All order persistence queries against the SQLite database."""
-
-    _counter_cache: Optional[int] = None
+    """Order persistence queries."""
 
     def _next_order_id(self, session: Session) -> str:
-        # Find the highest existing order number
         orders = session.exec(select(Order)).all()
         if not orders:
             return "ORD-1001"
